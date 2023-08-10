@@ -43,14 +43,7 @@
 			"rdkafkaConsumeTimeout": 5,
 			"rdkafkaMaxConsumerCommitRetries": 10
 		},
-		"customRestartOnKafkaErrorCodes": [
-			-195,
-			-192,
-			-187,
-			-185,
-			-181,
-			14
-		]
+		"customRestartOnKafkaErrorCodes": [-195, -192, -187, -185, -181, 14]
 	},
 	"zookeeper": {
 		"endpoint": "zookeeper:2181"
@@ -227,21 +220,10 @@
 	},
 	"foreman": {
 		"alfred": "http://alfred:3000",
-		"queues": [
-			"paparazziQueue",
-			"augloopQueue",
-			"headlessQueue"
-		],
+		"queues": ["paparazziQueue", "augloopQueue", "headlessQueue"],
 		"permissions": {
-			"paparazziQueue": [
-				"snapshot",
-				"spell",
-				"intel",
-				"translation"
-			],
-			"augloopQueue": [
-				"augmentation"
-			],
+			"paparazziQueue": ["snapshot", "spell", "intel", "translation"],
+			"augloopQueue": ["augmentation"],
 			"headlessQueue": [
 				"chain-snapshot",
 				"chain-intel",
