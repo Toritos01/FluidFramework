@@ -53,6 +53,7 @@ const defaultRouterliciousDriverPolicies: IRouterliciousDriverPolicies = {
 	enableRestLess: true,
 	enableInternalSummaryCaching: true,
 	enableLongPollingDowngrade: true,
+	isEphemeralContainer: false,
 };
 
 /**
@@ -144,6 +145,7 @@ export class RouterliciousDocumentServiceFactory implements IDocumentServiceFact
 				details: JSON.stringify({
 					enableDiscovery: this.driverPolicies.enableDiscovery,
 					sequenceNumber: documentAttributes.sequenceNumber,
+					isEphemeralContainer: this.driverPolicies.isEphemeralContainer,
 				}),
 			},
 			async (event) => {
@@ -158,6 +160,7 @@ export class RouterliciousDocumentServiceFactory implements IDocumentServiceFact
 						enableDiscovery: this.driverPolicies.enableDiscovery,
 						generateToken: this.tokenProvider.documentPostCreateCallback !== undefined,
 						enableAnyBinaryBlobOnFirstSummary: true,
+						isEphemeralContainer: this.driverPolicies.isEphemeralContainer,
 					})
 				).content;
 

@@ -40,6 +40,7 @@ export interface IRouterliciousDriverPolicies {
     enablePrefetch: boolean;
     enableRestLess: boolean;
     enableWholeSummaryUpload: boolean;
+    isEphemeralContainer?: boolean;
     maxConcurrentOrdererRequests: number;
     maxConcurrentStorageRequests: number;
 }
