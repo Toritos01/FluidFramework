@@ -43,13 +43,20 @@
 			"rdkafkaConsumeTimeout": 5,
 			"rdkafkaMaxConsumerCommitRetries": 10
 		},
-		"customRestartOnKafkaErrorCodes": [-195, -192, -187, -185, -181, 14]
+		"customRestartOnKafkaErrorCodes": [
+			-195,
+			-192,
+			-187,
+			-185,
+			-181,
+			14
+		]
 	},
 	"zookeeper": {
 		"endpoint": "zookeeper:2181"
 	},
 	"storage": {
-		"enableWholeSummaryUpload": false,
+		"enableWholeSummaryUpload": true,
 		"storageUrl": "http://gitrest:3000"
 	},
 	"checkpoints": {
@@ -70,7 +77,7 @@
 		"numberOfMessagesPerTrace": 100,
 		"sessionStickinessDurationMs": 3600000,
 		"enableConnectionCountLogging": false,
-		"ignoreEphemeralFlag": true,
+		"ignoreEphemeralFlag": false,
 		"throttling": {
 			"restCallsPerTenant": {
 				"generalRestCall": "disabled",
@@ -220,10 +227,21 @@
 	},
 	"foreman": {
 		"alfred": "http://alfred:3000",
-		"queues": ["paparazziQueue", "augloopQueue", "headlessQueue"],
+		"queues": [
+			"paparazziQueue",
+			"augloopQueue",
+			"headlessQueue"
+		],
 		"permissions": {
-			"paparazziQueue": ["snapshot", "spell", "intel", "translation"],
-			"augloopQueue": ["augmentation"],
+			"paparazziQueue": [
+				"snapshot",
+				"spell",
+				"intel",
+				"translation"
+			],
+			"augloopQueue": [
+				"augmentation"
+			],
 			"headlessQueue": [
 				"chain-snapshot",
 				"chain-intel",
