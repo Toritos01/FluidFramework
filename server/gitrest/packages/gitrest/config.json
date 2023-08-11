@@ -25,7 +25,7 @@
 		"ephemeralfilesystem": {
 			"name": "redisFs"
 		},
-		"persistLatestFullSummary": false,
+		"persistLatestFullSummary": true,
 		"repoPerDocEnabled": true,
 		"enableRepositoryManagerMetrics": false,
 		"apiMetricsSamplingPeriod": 100,
