@@ -20,6 +20,7 @@ import {
 	IDenyList,
 } from "../services";
 import { containsPathTraversal, parseToken } from "../utils";
+import { KeyRetriever } from "../keyRetriever";
 
 /**
  * Helper function to handle a promise that should be returned to the user.
@@ -130,24 +131,22 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 			// If an ephemeral flag was passed in, cache it in Redis
 			await cache.set(isEphemeralKey, isEphemeralContainer);
 		} else {
-			// Otherwise, try getting the ephemeral flag from Redis cache if it exists
-			isEphemeral = await cache.get(isEphemeralKey);
-			if (!isEphemeral) {
-				// If Redis cache does not have the ephemeral flag for this document, fallback to CosmosDB
-				const alfredUrl = "http://alfred:3000";
-				const riddlerEndpoint = "http://riddler:5000";
+			const alfredUrl = "http://alfred:3000";
+			const riddlerEndpoint = "http://riddler:5000";
 
-				const tenantManager = new TenantManager(
-					riddlerEndpoint,
-					undefined /* internalHistorianUrl */,
-				);
-				const documentManager = new DocumentManager(alfredUrl, tenantManager);
+			const tenantManager = new TenantManager(
+				riddlerEndpoint,
+				undefined /* internalHistorianUrl */,
+			);
+			const documentManager = new DocumentManager(alfredUrl, tenantManager);
 
-				const documentDetails = await documentManager.readDocument(tenantId, documentId);
-				if (documentDetails?.[isEphemeralKey]) {
-					isEphemeral = documentDetails[isEphemeralKey];
-				}
-			}
+			const keyRetriever: KeyRetriever = new KeyRetriever(cache, documentManager);
+			isEphemeral = await keyRetriever.getKeyRedisFallback<boolean>(
+				isEphemeralKey,
+				tenantId,
+				documentId,
+				true,
+			);
 		}
 	}
 	const calculatedStorageName =
