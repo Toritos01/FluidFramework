@@ -11,6 +11,7 @@ import { ITokenClaims } from "@fluidframework/protocol-definitions";
 import { NetworkError } from "@fluidframework/server-services-client";
 import { Lumberjack } from "@fluidframework/server-services-telemetry";
 import { IStorageNameRetriever, IRevokedTokenChecker } from "@fluidframework/server-services-core";
+import { DocumentManager, TenantManager } from "@fluidframework/server-services";
 import {
 	ICache,
 	ITenantService,
@@ -124,11 +125,29 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 
 	let isEphemeral = isEphemeralContainer;
 	if (!ignoreEphemeralFlag) {
+		const isEphemeralKey = `isEphemeral:${documentId}`;
 		if (isEphemeralContainer !== undefined) {
-			await cache.set(`isEphemeral:${documentId}`, isEphemeralContainer);
+			// If an ephemeral flag was passed in, cache it in Redis
+			await cache.set(isEphemeralKey, isEphemeralContainer);
 		} else {
-			isEphemeral = await cache.get(`isEphemeral:${documentId}`);
-			// Todo: If isEphemeral is still undefined fetch the value from database
+			// Otherwise, try getting the ephemeral flag from Redis cache if it exists
+			isEphemeral = await cache.get(isEphemeralKey);
+			if (!isEphemeral) {
+				// If Redis cache does not have the ephemeral flag for this document, fallback to CosmosDB
+				const alfredUrl = "http://alfred:3000";
+				const riddlerEndpoint = "http://riddler:5000";
+
+				const tenantManager = new TenantManager(
+					riddlerEndpoint,
+					undefined /* internalHistorianUrl */,
+				);
+				const documentManager = new DocumentManager(alfredUrl, tenantManager);
+
+				const documentDetails = await documentManager.readDocument(tenantId, documentId);
+				if (documentDetails?.[isEphemeralKey]) {
+					isEphemeral = documentDetails[isEphemeralKey];
+				}
+			}
 		}
 	}
 	const calculatedStorageName =
