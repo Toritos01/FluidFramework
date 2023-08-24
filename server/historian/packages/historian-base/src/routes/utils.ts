@@ -12,6 +12,7 @@ import { NetworkError } from "@fluidframework/server-services-client";
 import { Lumberjack } from "@fluidframework/server-services-telemetry";
 import { IStorageNameRetriever, IRevokedTokenChecker } from "@fluidframework/server-services-core";
 import { DocumentManager, TenantManager } from "@fluidframework/server-services";
+import { DocumentKeyRetriever } from "@fluidframework/server-services-utils";
 import {
 	ICache,
 	ITenantService,
@@ -20,7 +21,6 @@ import {
 	IDenyList,
 } from "../services";
 import { containsPathTraversal, parseToken } from "../utils";
-import { KeyRetriever } from "../keyRetriever";
 
 /**
  * Helper function to handle a promise that should be returned to the user.
@@ -124,12 +124,13 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 	const maxCacheableSummarySize: number =
 		config.get("restGitService:maxCacheableSummarySize") ?? 1_000_000_000; // default: 1gb
 
-	let isEphemeral = isEphemeralContainer;
+	let isEphemeral: boolean = isEphemeralContainer;
 	if (!ignoreEphemeralFlag) {
-		const isEphemeralKey = `isEphemeral:${documentId}`;
-		if (isEphemeralContainer !== undefined) {
+		const isEphemeralKeyRedis = `isEphemeral:${documentId}`;
+		const isEphemeralKeyCosmos = "isEphemeralContainer";
+		if (isEphemeral !== undefined && isEphemeral !== null) {
 			// If an ephemeral flag was passed in, cache it in Redis
-			await cache.set(isEphemeralKey, isEphemeralContainer);
+			await cache.set(isEphemeralKeyRedis, isEphemeral);
 		} else {
 			const alfredUrl = "http://alfred:3000";
 			const riddlerEndpoint = "http://riddler:5000";
@@ -140,13 +141,37 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 			);
 			const documentManager = new DocumentManager(alfredUrl, tenantManager);
 
-			const keyRetriever: KeyRetriever = new KeyRetriever(cache, documentManager);
+			const keyRetriever: DocumentKeyRetriever = new DocumentKeyRetriever(
+				cache,
+				documentManager,
+			);
+			// const eph1: boolean = await keyRetriever.getKeyCosmos<boolean>(
+			// 	isEphemeralKeyCosmos,
+			// 	tenantId,
+			// 	documentId,
+			// 	true,
+			// );
+			// const eph2: boolean = await keyRetriever.getKeyCosmos<boolean>(
+			// 	isEphemeralKeyCosmos,
+			// 	tenantId,
+			// 	documentId,
+			// 	true,
+			// );
+			// Lumberjack.info(`Eph1: ${eph1} and Eph2: ${eph2}`);
+			// if (eph1) {
+			// 	Lumberjack.info("EPHEMERAL1");
+			// }
+			// if (eph2) {
+			// 	Lumberjack.info("EPHEMERAL2");
+			// }
 			isEphemeral = await keyRetriever.getKeyRedisFallback<boolean>(
-				isEphemeralKey,
+				isEphemeralKeyRedis,
+				isEphemeralKeyCosmos,
 				tenantId,
 				documentId,
 				true,
 			);
+			Lumberjack.info(`Is ephemeral on redis or cosmos? Value:( ${isEphemeral} )`);
 		}
 	}
 	const calculatedStorageName =
