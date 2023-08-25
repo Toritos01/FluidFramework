@@ -132,38 +132,20 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 			// If an ephemeral flag was passed in, cache it in Redis
 			await cache.set(isEphemeralKeyRedis, isEphemeral);
 		} else {
+			// Otherwise check redis, then cosmosDB for the flag
 			const alfredUrl = "http://alfred:3000";
 			const riddlerEndpoint = "http://riddler:5000";
-
 			const tenantManager = new TenantManager(
 				riddlerEndpoint,
 				undefined /* internalHistorianUrl */,
 			);
 			const documentManager = new DocumentManager(alfredUrl, tenantManager);
-
 			const keyRetriever: DocumentKeyRetriever = new DocumentKeyRetriever(
 				cache,
 				documentManager,
+				true,
 			);
-			// const eph1: boolean = await keyRetriever.getKeyCosmos<boolean>(
-			// 	isEphemeralKeyCosmos,
-			// 	tenantId,
-			// 	documentId,
-			// 	true,
-			// );
-			// const eph2: boolean = await keyRetriever.getKeyCosmos<boolean>(
-			// 	isEphemeralKeyCosmos,
-			// 	tenantId,
-			// 	documentId,
-			// 	true,
-			// );
-			// Lumberjack.info(`Eph1: ${eph1} and Eph2: ${eph2}`);
-			// if (eph1) {
-			// 	Lumberjack.info("EPHEMERAL1");
-			// }
-			// if (eph2) {
-			// 	Lumberjack.info("EPHEMERAL2");
-			// }
+
 			isEphemeral = await keyRetriever.getKeyRedisFallback<boolean>(
 				isEphemeralKeyRedis,
 				isEphemeralKeyCosmos,
@@ -171,9 +153,12 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 				documentId,
 				true,
 			);
-			Lumberjack.info(`Is ephemeral on redis or cosmos? Value:( ${isEphemeral} )`);
 		}
+	} else {
+		isEphemeral = false;
 	}
+	Lumberjack.info(`Document ${documentId} is ${isEphemeral ? "" : "not "}ephemeral.`);
+
 	const calculatedStorageName =
 		initialUpload && storageName
 			? storageName
