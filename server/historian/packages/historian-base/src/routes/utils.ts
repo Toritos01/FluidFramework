@@ -11,7 +11,6 @@ import { ITokenClaims } from "@fluidframework/protocol-definitions";
 import { NetworkError } from "@fluidframework/server-services-client";
 import { Lumberjack } from "@fluidframework/server-services-telemetry";
 import { IStorageNameRetriever, IRevokedTokenChecker } from "@fluidframework/server-services-core";
-import { DocumentManager, TenantManager } from "@fluidframework/server-services";
 import { DocumentKeyRetriever } from "@fluidframework/server-services-utils";
 import {
 	ICache,
@@ -133,18 +132,8 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 			await cache.set(isEphemeralKeyRedis, isEphemeral);
 		} else {
 			// Otherwise check redis, then cosmosDB for the flag
-			const alfredUrl = "http://alfred:3000";
-			const riddlerEndpoint = "http://riddler:5000";
-			const tenantManager = new TenantManager(
-				riddlerEndpoint,
-				undefined /* internalHistorianUrl */,
-			);
-			const documentManager = new DocumentManager(alfredUrl, tenantManager);
-			const keyRetriever: DocumentKeyRetriever = new DocumentKeyRetriever(
-				cache,
-				documentManager,
-				true,
-			);
+			// const riddlerEndpoint = config.get("riddler");
+			const keyRetriever: DocumentKeyRetriever = new DocumentKeyRetriever(cache, undefined);
 
 			isEphemeral = await keyRetriever.getKeyRedisFallback<boolean>(
 				isEphemeralKeyRedis,

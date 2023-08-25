@@ -3,17 +3,39 @@
  * Licensed under the MIT License.
  */
 
+import * as path from "path";
+import nconf from "nconf";
 import { IDocumentManager } from "@fluidframework/server-services-core";
 import { Lumberjack } from "@fluidframework/server-services-telemetry";
+import { DocumentManager, TenantManager } from "../../services";
 
 export class DocumentKeyRetriever {
 	private loggingEnabled: boolean;
+	private readonly documentManager: IDocumentManager;
 
 	public constructor(
 		private readonly redis: any,
-		private readonly documentManager: IDocumentManager,
+		documentManager?: IDocumentManager,
 		loggingEnabled: boolean = true,
 	) {
+		// If no document manager is passed to the constructor, a new one will be created
+		if (documentManager) {
+			this.documentManager = documentManager;
+		} else {
+			const config = nconf
+				.argv()
+				.env({ separator: "__", parseValues: true })
+				.file(path.join(__dirname, "../../routerlicious/config/config.json"))
+				.use("memory");
+
+			const alfredEndpoint: string = config.get("worker:alfredUrl");
+			const tenantManager = new TenantManager(
+				config.get("auth:endpoint"),
+				undefined /* internalHistorianUrl */,
+			);
+			this.documentManager = new DocumentManager(alfredEndpoint, tenantManager);
+		}
+
 		this.loggingEnabled = loggingEnabled;
 	}
 
