@@ -3,40 +3,30 @@
  * Licensed under the MIT License.
  */
 
-import * as path from "path";
-import nconf from "nconf";
 import { IDocumentManager } from "@fluidframework/server-services-core";
 import { Lumberjack } from "@fluidframework/server-services-telemetry";
-import { DocumentManager, TenantManager } from "../../services";
 
 export class DocumentKeyRetriever {
-	private loggingEnabled: boolean;
-	private readonly documentManager: IDocumentManager;
-
 	public constructor(
+		/* The type of the redis variable is currently set to "any," which is not ideal. The reason for this
+		 * is that there is currently a different RedisCache and ICache implementation for Routerlicious, Gitrest, and Historian, which all differ slightly.
+		 * The RedisCache intented to be passed into this constructor is the one from Historian, however I am not able to import Historian's ICache or RedisCache into r11s.
+		 * Using r11s' ICache also doesn't work because it has different return types than the Historian ICache, which has templated outputs/inputs for cache.get and cache.set.
+		 *
+		 * Here is what I propose:
+		 * 1. We leave it as type "any" for now
+		 * 2. During Microsoft's FHL week (September 11-15), I will work on refactoring RedisCache such that Routerlicious, Gitrest, and Historian will all use the same ICache/RedisCache (with the prefix being passed into the constructor)
+		 */
 		private readonly redis: any,
-		documentManager?: IDocumentManager,
-		loggingEnabled: boolean = true,
+		private readonly documentManager: IDocumentManager,
+		private readonly loggingEnabled: boolean = true,
 	) {
-		// If no document manager is passed to the constructor, a new one will be created
-		if (documentManager) {
-			this.documentManager = documentManager;
-		} else {
-			const config = nconf
-				.argv()
-				.env({ separator: "__", parseValues: true })
-				.file(path.join(__dirname, "../../routerlicious/config/config.json"))
-				.use("memory");
-
-			const alfredEndpoint: string = config.get("worker:alfredUrl");
-			const tenantManager = new TenantManager(
-				config.get("auth:endpoint"),
-				undefined /* internalHistorianUrl */,
-			);
-			this.documentManager = new DocumentManager(alfredEndpoint, tenantManager);
+		if (!redis) {
+			throw new Error("Redis cache is undefined.");
 		}
-
-		this.loggingEnabled = loggingEnabled;
+		if (!documentManager) {
+			throw new Error("Document manager is undefined.");
+		}
 	}
 
 	public async getKeyCosmos<ValType>(
@@ -132,14 +122,6 @@ export class DocumentKeyRetriever {
 
 	private static getDocumentDetailsKey(documentId: string): string {
 		return `documentDetails:${documentId}`;
-	}
-
-	public enableLogging() {
-		this.loggingEnabled = true;
-	}
-
-	public disableLogging() {
-		this.loggingEnabled = false;
 	}
 
 	private infoLog(message: string) {
