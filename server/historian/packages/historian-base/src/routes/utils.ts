@@ -80,6 +80,7 @@ export class createGitServiceArgs {
 	authorization: string;
 	tenantService: ITenantService;
 	storageNameRetriever: IStorageNameRetriever;
+	documentKeyRetriever: DocumentKeyRetriever;
 	cache?: ICache;
 	asyncLocalStorage?: AsyncLocalStorage<string>;
 	initialUpload?: boolean = false;
@@ -97,6 +98,7 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 		authorization,
 		tenantService,
 		storageNameRetriever,
+		documentKeyRetriever,
 		cache,
 		asyncLocalStorage,
 		initialUpload,
@@ -132,10 +134,7 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 			await cache.set(isEphemeralKeyRedis, isEphemeral);
 		} else {
 			// Otherwise check redis, then cosmosDB for the flag
-			// const riddlerEndpoint = config.get("riddler");
-			const keyRetriever: DocumentKeyRetriever = new DocumentKeyRetriever(cache, undefined);
-
-			isEphemeral = await keyRetriever.getKeyRedisFallback<boolean>(
+			isEphemeral = await documentKeyRetriever.getKeyRedisFallback<boolean>(
 				isEphemeralKeyRedis,
 				isEphemeralKeyCosmos,
 				tenantId,

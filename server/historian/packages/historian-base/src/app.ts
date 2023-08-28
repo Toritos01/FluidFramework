@@ -19,6 +19,7 @@ import {
 	alternativeMorganLoggerMiddleware,
 	bindCorrelationId,
 	jsonMorganLoggerMiddleware,
+	DocumentKeyRetriever,
 } from "@fluidframework/server-services-utils";
 import { BaseTelemetryProperties, HttpProperties } from "@fluidframework/server-services-telemetry";
 import { RestLessServer } from "@fluidframework/server-services-shared";
@@ -30,6 +31,7 @@ export function create(
 	config: nconf.Provider,
 	tenantService: ITenantService,
 	storageNameRetriever: IStorageNameRetriever,
+	documentKeyRetriever: DocumentKeyRetriever,
 	restTenantThrottlers: Map<string, IThrottler>,
 	restClusterThrottlers: Map<string, IThrottler>,
 	cache?: ICache,
@@ -89,6 +91,7 @@ export function create(
 		config,
 		tenantService,
 		storageNameRetriever,
+		documentKeyRetriever,
 		restTenantThrottlers,
 		restClusterThrottlers,
 		cache,
