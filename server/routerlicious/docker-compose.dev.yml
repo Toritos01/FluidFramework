@@ -1,26 +1,32 @@
 version: "3.4"
 services:
   alfred:
+    platform: linux/amd64
     volumes:
       - .:/usr/src/server
       - /usr/src/server/node_modules
   deli:
+    platform: linux/amd64
     volumes:
       - .:/usr/src/server
       - /usr/src/server/node_modules
   scriptorium:
+    platform: linux/amd64
     volumes:
       - .:/usr/src/server
       - /usr/src/server/node_modules
   copier:
+    platform: linux/amd64
     volumes:
       - .:/usr/src/server
       - /usr/src/server/node_modules
   scribe:
+    platform: linux/amd64
     volumes:
       - .:/usr/src/server
       - /usr/src/server/node_modules
   riddler:
+    platform: linux/amd64
     volumes:
       - .:/usr/src/server
       - /usr/src/server/node_modules
