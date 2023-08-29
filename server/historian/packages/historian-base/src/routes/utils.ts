@@ -11,6 +11,7 @@ import { ITokenClaims } from "@fluidframework/protocol-definitions";
 import { NetworkError } from "@fluidframework/server-services-client";
 import { Lumberjack } from "@fluidframework/server-services-telemetry";
 import { IStorageNameRetriever, IRevokedTokenChecker } from "@fluidframework/server-services-core";
+import { DocumentKeyRetriever } from "@fluidframework/server-services-utils";
 import {
 	ICache,
 	ITenantService,
@@ -78,6 +79,7 @@ export class createGitServiceArgs {
 	authorization: string;
 	tenantService: ITenantService;
 	storageNameRetriever: IStorageNameRetriever;
+	documentKeyRetriever: DocumentKeyRetriever;
 	cache?: ICache;
 	asyncLocalStorage?: AsyncLocalStorage<string>;
 	initialUpload?: boolean = false;
@@ -95,6 +97,7 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 		authorization,
 		tenantService,
 		storageNameRetriever,
+		documentKeyRetriever,
 		cache,
 		asyncLocalStorage,
 		initialUpload,
@@ -121,15 +124,28 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 	const maxCacheableSummarySize: number =
 		config.get("restGitService:maxCacheableSummarySize") ?? 1_000_000_000; // default: 1gb
 
-	let isEphemeral = cache ? isEphemeralContainer : false;
+	let isEphemeral: boolean = isEphemeralContainer;
 	if (!ignoreEphemeralFlag) {
-		if (isEphemeralContainer !== undefined) {
-			await cache?.set(`isEphemeral:${documentId}`, isEphemeralContainer);
+		const isEphemeralKeyRedis = `isEphemeral:${documentId}`;
+		const isEphemeralKeyCosmos = "isEphemeralContainer";
+		if (isEphemeral !== undefined && isEphemeral !== null) {
+			// If an ephemeral flag was passed in, cache it in Redis
+			await cache.set(isEphemeralKeyRedis, isEphemeral);
 		} else {
-			isEphemeral = await cache?.get(`isEphemeral:${documentId}`);
-			// Todo: If isEphemeral is still undefined fetch the value from database
+			// Otherwise check redis, then cosmosDB for the flag
+			isEphemeral = await documentKeyRetriever.getKeyRedisFallback<boolean>(
+				isEphemeralKeyRedis,
+				isEphemeralKeyCosmos,
+				tenantId,
+				documentId,
+				true,
+			);
 		}
+	} else {
+		isEphemeral = false;
 	}
+	Lumberjack.info(`Document ${documentId} is ${isEphemeral ? "" : "not "}ephemeral.`);
+
 	const calculatedStorageName =
 		initialUpload && storageName
 			? storageName

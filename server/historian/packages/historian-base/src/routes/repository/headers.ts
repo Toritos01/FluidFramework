@@ -14,6 +14,7 @@ import {
 	IThrottleMiddlewareOptions,
 	throttle,
 	getParam,
+	DocumentKeyRetriever,
 } from "@fluidframework/server-services-utils";
 import { Router } from "express";
 import * as nconf from "nconf";
@@ -26,6 +27,7 @@ export function create(
 	config: nconf.Provider,
 	tenantService: ITenantService,
 	storageNameRetriever: IStorageNameRetriever,
+	documentKeyRetriever: DocumentKeyRetriever,
 	restTenantThrottlers: Map<string, IThrottler>,
 	cache?: ICache,
 	asyncLocalStorage?: AsyncLocalStorage<string>,
@@ -54,6 +56,7 @@ export function create(
 			authorization,
 			tenantService,
 			storageNameRetriever,
+			documentKeyRetriever,
 			cache,
 			asyncLocalStorage,
 			denyList,
@@ -73,6 +76,7 @@ export function create(
 			authorization,
 			tenantService,
 			storageNameRetriever,
+			documentKeyRetriever,
 			cache,
 			asyncLocalStorage,
 			denyList,

@@ -9,6 +9,8 @@ import * as utils from "@fluidframework/server-services-utils";
 import { Provider } from "nconf";
 import * as Redis from "ioredis";
 import winston from "winston";
+import { IDocumentManager, ITenantManager } from "@fluidframework/server-services-core";
+import { DocumentManager, TenantManager } from "@fluidframework/server-services";
 import * as historianServices from "./services";
 import { normalizePort, Constants } from "./utils";
 import { HistorianRunner } from "./runner";
@@ -22,6 +24,7 @@ export class HistorianResources implements core.IResources {
 		public readonly port: string | number,
 		public readonly riddler: historianServices.ITenantService,
 		public readonly storageNameRetriever: core.IStorageNameRetriever,
+		public readonly documentKeyRetriever: utils.DocumentKeyRetriever,
 		public readonly restTenantThrottlers: Map<string, core.IThrottler>,
 		public readonly restClusterThrottlers: Map<string, core.IThrottler>,
 		public readonly cache?: historianServices.RedisCache,
@@ -79,6 +82,7 @@ export class HistorianResourcesFactory implements core.IResourcesFactory<Histori
 		const tenantCache = new historianServices.RedisTenantCache(redisClient, redisParams);
 		// Create services
 		const riddlerEndpoint = config.get("riddler");
+		const alfredEndpoint = config.get("alfred");
 		const asyncLocalStorage = config.get("asyncLocalStorageInstance")?.[0];
 		const riddler = new historianServices.RiddlerService(
 			riddlerEndpoint,
@@ -205,6 +209,16 @@ export class HistorianResourcesFactory implements core.IResourcesFactory<Histori
 			? customizations?.storageNameRetriever ?? new services.StorageNameRetriever()
 			: undefined;
 
+		const tenantManager: ITenantManager = new TenantManager(
+			riddlerEndpoint,
+			undefined /* internalHistorianUrl */,
+		);
+		const documentManager: IDocumentManager = new DocumentManager(
+			alfredEndpoint,
+			tenantManager,
+		);
+		const documentKeyRetriever = new utils.DocumentKeyRetriever(gitCache, documentManager);
+
 		const port = normalizePort(process.env.PORT || "3000");
 
 		// Token revocation
@@ -221,6 +235,7 @@ export class HistorianResourcesFactory implements core.IResourcesFactory<Histori
 			port,
 			riddler,
 			storageNameRetriever,
+			documentKeyRetriever,
 			restTenantThrottlers,
 			restClusterThrottlers,
 			gitCache,
@@ -239,6 +254,7 @@ export class HistorianRunnerFactory implements core.IRunnerFactory<HistorianReso
 			resources.port,
 			resources.riddler,
 			resources.storageNameRetriever,
+			resources.documentKeyRetriever,
 			resources.restTenantThrottlers,
 			resources.restClusterThrottlers,
 			resources.cache,

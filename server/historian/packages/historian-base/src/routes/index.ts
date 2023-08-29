@@ -11,6 +11,7 @@ import {
 } from "@fluidframework/server-services-core";
 import { Router } from "express";
 import * as nconf from "nconf";
+import { DocumentKeyRetriever } from "@fluidframework/server-services-utils";
 import { ICache, IDenyList, ITenantService } from "../services";
 /* eslint-disable import/no-internal-modules */
 import * as blobs from "./git/blobs";
@@ -44,6 +45,7 @@ export function create(
 	config: nconf.Provider,
 	tenantService: ITenantService,
 	storageNameRetriever: IStorageNameRetriever,
+	documentKeyRetriever: DocumentKeyRetriever,
 	restTenantThrottlers: Map<string, IThrottler>,
 	restClusterThrottlers: Map<string, IThrottler>,
 	cache?: ICache,
@@ -57,6 +59,7 @@ export function create(
 				config,
 				tenantService,
 				storageNameRetriever,
+				documentKeyRetriever,
 				restTenantThrottlers,
 				cache,
 				asyncLocalStorage,
@@ -67,6 +70,7 @@ export function create(
 				config,
 				tenantService,
 				storageNameRetriever,
+				documentKeyRetriever,
 				restTenantThrottlers,
 				cache,
 				asyncLocalStorage,
@@ -77,6 +81,7 @@ export function create(
 				config,
 				tenantService,
 				storageNameRetriever,
+				documentKeyRetriever,
 				restTenantThrottlers,
 				cache,
 				asyncLocalStorage,
@@ -87,6 +92,7 @@ export function create(
 				config,
 				tenantService,
 				storageNameRetriever,
+				documentKeyRetriever,
 				restTenantThrottlers,
 				cache,
 				asyncLocalStorage,
@@ -97,6 +103,7 @@ export function create(
 				config,
 				tenantService,
 				storageNameRetriever,
+				documentKeyRetriever,
 				restTenantThrottlers,
 				cache,
 				asyncLocalStorage,
@@ -109,6 +116,7 @@ export function create(
 				config,
 				tenantService,
 				storageNameRetriever,
+				documentKeyRetriever,
 				restTenantThrottlers,
 				cache,
 				asyncLocalStorage,
@@ -119,6 +127,7 @@ export function create(
 				config,
 				tenantService,
 				storageNameRetriever,
+				documentKeyRetriever,
 				restTenantThrottlers,
 				cache,
 				asyncLocalStorage,
@@ -129,6 +138,7 @@ export function create(
 				config,
 				tenantService,
 				storageNameRetriever,
+				documentKeyRetriever,
 				restTenantThrottlers,
 				cache,
 				asyncLocalStorage,
@@ -140,6 +150,7 @@ export function create(
 			config,
 			tenantService,
 			storageNameRetriever,
+			documentKeyRetriever,
 			restTenantThrottlers,
 			restClusterThrottlers,
 			cache,
