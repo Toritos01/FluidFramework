@@ -126,7 +126,8 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 
 	let isEphemeral: boolean = isEphemeralContainer;
 	if (!ignoreEphemeralFlag) {
-		const isEphemeralKeyRedis = `isEphemeral:${documentId}`;
+		const isEphemeralKeyBase = "isEphemeralContainer" // Todo, change getKeyRedisFallback to use this instead of bottom two, once R11S Pr goes through
+		const isEphemeralKeyRedis = `isEphemeralContainer:${documentId}`;
 		const isEphemeralKeyCosmos = "isEphemeralContainer";
 		if (isEphemeral !== undefined && isEphemeral !== null) {
 			// If an ephemeral flag was passed in, cache it in Redis
