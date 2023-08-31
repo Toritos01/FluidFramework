@@ -10,7 +10,6 @@ import { Provider } from "nconf";
 import * as Redis from "ioredis";
 import winston from "winston";
 import { IDocumentManager, ITenantManager } from "@fluidframework/server-services-core";
-import { DocumentManager, TenantManager } from "@fluidframework/server-services";
 import * as historianServices from "./services";
 import { normalizePort, Constants } from "./utils";
 import { HistorianRunner } from "./runner";
@@ -209,11 +208,11 @@ export class HistorianResourcesFactory implements core.IResourcesFactory<Histori
 			? customizations?.storageNameRetriever ?? new services.StorageNameRetriever()
 			: undefined;
 
-		const tenantManager: ITenantManager = new TenantManager(
+		const tenantManager: ITenantManager = new services.TenantManager(
 			riddlerEndpoint,
 			undefined /* internalHistorianUrl */,
 		);
-		const documentManager: IDocumentManager = new DocumentManager(
+		const documentManager: IDocumentManager = new services.DocumentManager(
 			alfredEndpoint,
 			tenantManager,
 		);
