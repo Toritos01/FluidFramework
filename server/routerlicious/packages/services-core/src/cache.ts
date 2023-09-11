@@ -10,12 +10,12 @@ export interface ICache {
 	/**
 	 * Retrieves the cached entry for the given key. Or null if it doesn't exist.
 	 */
-	get(key: string): Promise<string>;
+	get<T>(key: string): Promise<T>;
 
 	/**
 	 * Sets a cache value
 	 */
-	set(key: string, value: string, expireAfterSeconds?: number): Promise<void>;
+	set<T>(key: string, value: T, expireAfterSeconds?: number): Promise<void>;
 
 	/**
 	 * Deletes a cache value

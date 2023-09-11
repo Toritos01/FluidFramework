@@ -14,7 +14,7 @@ import { Lumberjack } from "@fluidframework/server-services-telemetry";
  */
 export class RedisCache implements ICache {
 	private readonly expireAfterSeconds: number = 60 * 60 * 24;
-	private readonly prefix: string = "page";
+	private readonly prefix: string; // = "page";
 	constructor(private readonly client: Redis.default, parameters?: IRedisParameters) {
 		if (parameters?.expireAfterSeconds) {
 			this.expireAfterSeconds = parameters.expireAfterSeconds;
@@ -22,6 +22,10 @@ export class RedisCache implements ICache {
 
 		if (parameters?.prefix) {
 			this.prefix = parameters.prefix;
+		} else {
+			this.prefix = "";
+			winston.warn("A prefix for RedisCache was not included in the parameters.");
+			Lumberjack.warning("A prefix for RedisCache was not included in the parameters.")
 		}
 
 		client.on("error", (err) => {
@@ -39,16 +43,17 @@ export class RedisCache implements ICache {
 		}
 	}
 
-	public async get(key: string): Promise<string> {
-		return this.client.get(this.getKey(key));
+	public async get<T>(key: string): Promise<T> {
+		const stringValue: string = await this.client.get(this.getKey(key));
+		return JSON.parse(stringValue) as T;
 	}
 
-	public async set(key: string, value: string, expireAfterSeconds?: number): Promise<void> {
+	public async set<T>(key: string, value: T, expireAfterSeconds: number = this.expireAfterSeconds): Promise<void> {
 		const result = await this.client.set(
 			this.getKey(key),
-			value,
+			JSON.stringify(value),
 			"EX",
-			expireAfterSeconds ?? this.expireAfterSeconds,
+			expireAfterSeconds,
 		);
 		if (result !== "OK") {
 			throw new Error(result);
