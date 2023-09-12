@@ -14,7 +14,7 @@ import { Lumberjack } from "@fluidframework/server-services-telemetry";
  */
 export class RedisCache implements ICache {
 	private readonly expireAfterSeconds: number = 60 * 60 * 24;
-	public prefix: string;
+	private readonly prefix: string;
 
 	constructor(private readonly client: Redis.default, parameters?: IRedisParameters) {
 		if (parameters?.expireAfterSeconds) {
@@ -26,7 +26,7 @@ export class RedisCache implements ICache {
 		} else {
 			this.prefix = "";
 			winston.warn("A prefix for RedisCache was not included in the parameters.");
-			Lumberjack.warning("A prefix for RedisCache was not included in the parameters.")
+			Lumberjack.warning("A prefix for RedisCache was not included in the parameters.");
 		}
 
 		client.on("error", (err) => {
@@ -43,7 +43,7 @@ export class RedisCache implements ICache {
 		try {
 			const keyToDelete: string = appendPrefixToKey ? this.getKey(key) : key;
 			const result = await this.client.del(keyToDelete);
-			return result===1;
+			return result === 1;
 		} catch (error) {
 			Lumberjack.error(`Error deleting from cache.`, undefined, error);
 			return false;
@@ -55,7 +55,11 @@ export class RedisCache implements ICache {
 		return JSON.parse(stringValue) as T;
 	}
 
-	public async set<T>(key: string, value: T, expireAfterSeconds: number = this.expireAfterSeconds): Promise<void> {
+	public async set<T>(
+		key: string,
+		value: T,
+		expireAfterSeconds: number = this.expireAfterSeconds,
+	): Promise<void> {
 		const result = await this.client.set(
 			this.getKey(key),
 			JSON.stringify(value),

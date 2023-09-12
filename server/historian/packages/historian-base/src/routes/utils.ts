@@ -10,14 +10,12 @@ import * as nconf from "nconf";
 import { ITokenClaims } from "@fluidframework/protocol-definitions";
 import { NetworkError } from "@fluidframework/server-services-client";
 import { Lumberjack } from "@fluidframework/server-services-telemetry";
-import { IStorageNameRetriever, IRevokedTokenChecker } from "@fluidframework/server-services-core";
 import {
+	IStorageNameRetriever,
+	IRevokedTokenChecker,
 	ICache,
-	ITenantService,
-	RestGitService,
-	ITenantCustomDataExternal,
-	IDenyList,
-} from "../services";
+} from "@fluidframework/server-services-core";
+import { ITenantService, RestGitService, ITenantCustomDataExternal, IDenyList } from "../services";
 import { containsPathTraversal, parseToken } from "../utils";
 
 /**

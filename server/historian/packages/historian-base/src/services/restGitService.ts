@@ -19,13 +19,12 @@ import {
 	IWholeSummaryPayloadType,
 	LatestSummaryId,
 } from "@fluidframework/server-services-client";
-import { ITenantStorage, runWithRetry } from "@fluidframework/server-services-core";
+import { ITenantStorage, runWithRetry, ICache } from "@fluidframework/server-services-core";
 import * as uuid from "uuid";
 import * as winston from "winston";
 import { getCorrelationId } from "@fluidframework/server-services-utils";
 import { BaseTelemetryProperties, Lumberjack } from "@fluidframework/server-services-telemetry";
 import { Constants, getRequestErrorTranslator } from "../utils";
-import { ICache } from "./definitions";
 
 // We include the historian version in the user-agent string
 // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires

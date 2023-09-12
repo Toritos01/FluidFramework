@@ -13,6 +13,7 @@ import {
 	IStorageNameRetriever,
 	IThrottler,
 	IRevokedTokenChecker,
+	ICache,
 } from "@fluidframework/server-services-core";
 import {
 	IThrottleMiddlewareOptions,
@@ -23,7 +24,7 @@ import { Router } from "express";
 import * as nconf from "nconf";
 import winston from "winston";
 import { BaseTelemetryProperties, Lumberjack } from "@fluidframework/server-services-telemetry";
-import { ICache, IDenyList, ITenantService } from "../services";
+import { IDenyList, ITenantService } from "../services";
 import { parseToken, Constants } from "../utils";
 import * as utils from "./utils";
 

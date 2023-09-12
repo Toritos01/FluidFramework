@@ -24,7 +24,7 @@ export class HistorianResources implements core.IResources {
 		public readonly storageNameRetriever: core.IStorageNameRetriever,
 		public readonly restTenantThrottlers: Map<string, core.IThrottler>,
 		public readonly restClusterThrottlers: Map<string, core.IThrottler>,
-		public readonly cache?: historianServices.RedisCache,
+		public readonly cache?: core.ICache,
 		public readonly asyncLocalStorage?: AsyncLocalStorage<string>,
 		public revokedTokenChecker?: core.IRevokedTokenChecker,
 		public readonly denyList?: historianServices.IDenyList,
@@ -67,15 +67,16 @@ export class HistorianResourcesFactory implements core.IResourcesFactory<Histori
 			};
 		}
 
-		const redisParams = {
+		const redisParams: utils.IRedisParameters = {
 			expireAfterSeconds: redisConfig.keyExpireAfterSeconds as number | undefined,
+			prefix: "git",
 		};
 
 		const redisClient = new Redis.default(redisOptions);
 		const disableGitCache = config.get("restGitService:disableGitCache") as boolean | undefined;
 		const gitCache = disableGitCache
 			? undefined
-			: new historianServices.RedisCache(redisClient, redisParams);
+			: new services.RedisCache(redisClient, redisParams);
 		const tenantCache = new historianServices.RedisTenantCache(redisClient, redisParams);
 		// Create services
 		const riddlerEndpoint = config.get("riddler");
