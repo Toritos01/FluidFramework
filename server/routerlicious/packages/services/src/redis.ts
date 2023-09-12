@@ -15,6 +15,7 @@ import { Lumberjack } from "@fluidframework/server-services-telemetry";
 export class RedisCache implements ICache {
 	private readonly expireAfterSeconds: number = 60 * 60 * 24;
 	public prefix: string;
+
 	constructor(private readonly client: Redis.default, parameters?: IRedisParameters) {
 		if (parameters?.expireAfterSeconds) {
 			this.expireAfterSeconds = parameters.expireAfterSeconds;
@@ -33,10 +34,16 @@ export class RedisCache implements ICache {
 			Lumberjack.error("Error with Redis", undefined, err);
 		});
 	}
-	public async delete(key: string): Promise<boolean> {
+
+	public async delete(key: string, appendPrefixToKey: boolean = true): Promise<boolean> {
+		// If 'appendPrefixToKey' is true, we prepend a prefix to the 'key' parameter.
+		// This is useful in scenarios where we want to consistently manage keys with a common prefix,
+		// If 'appendPrefixToKey' is false, we assume that the 'key' parameter with prefix is already passed in by the caller,
+		// and no additional prefix needs to be added.
 		try {
-			await this.client.del(this.getKey(key));
-			return true;
+			const keyToDelete: string = appendPrefixToKey ? this.getKey(key) : key;
+			const result = await this.client.del(keyToDelete);
+			return result===1;
 		} catch (error) {
 			Lumberjack.error(`Error deleting from cache.`, undefined, error);
 			return false;
