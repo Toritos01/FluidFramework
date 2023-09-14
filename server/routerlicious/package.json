@@ -99,7 +99,7 @@
 			"@types/node": "^18.17.1",
 			"nx>@yarnpkg/parsers": "3.0.0-rc.48.1",
 			"qs": "^6.11.0",
-			"socket.io-parser": "^4.2.1"		
+			"socket.io-parser": "^4.2.1"
 		},
 		"peerDependencyComments": [
 			"@types/node is a peer dependency because of build tools. The package is not needed because it's only used for compilation. It's not needed at runtime."
@@ -112,8 +112,12 @@
 	},
 	"typeValidation": {
 		"broken": {
-			"InterfaceDeclaration_ICache": {"backCompat": false},
-			"ClassDeclaration_RedisCache": {"forwardCompat": false}
+			"InterfaceDeclaration_ICache": {
+				"backCompat": false
+			},
+			"ClassDeclaration_RedisCache": {
+				"forwardCompat": false
+			}
 		}
 	}
 }

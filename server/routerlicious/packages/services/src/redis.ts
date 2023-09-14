@@ -84,6 +84,16 @@ export class RedisCache implements ICache {
 		}
 	}
 
+	/**
+	 * Get a list of keys that have a given prefix.
+	 *
+	 * @param keyPrefix - Prefix for the keys to get.
+	 */
+	public async keysByPrefix(keyPrefix: string): Promise<string[]> {
+		const result: string[] = await this.client.keys(`${this.getKey(keyPrefix)}*`);
+		return result;
+	}
+
 	public async decr(key: string): Promise<number> {
 		try {
 			return this.client.decr(key);
