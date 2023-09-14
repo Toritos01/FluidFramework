@@ -24,9 +24,10 @@ import * as IoRedis from "ioredis";
 import sizeof from "object-sizeof";
 import { getRandomInt } from "@fluidframework/server-services-client";
 import { Lumberjack } from "@fluidframework/server-services-telemetry";
+import { RedisCache } from "@fluidframework/server-services";
+import { IRedisParameters } from "@fluidframework/server-services-utils";
 import { IFileSystemManager, IFileSystemPromises } from "../definitions";
 import { getStats, ISystemError, packedRefsFileName, SystemErrors } from "../fileSystemHelper";
-import { Redis, RedisParams } from "./redis";
 
 export interface RedisFsConfig {
 	enableRedisFsMetrics: boolean;
@@ -40,7 +41,7 @@ export class RedisFsManager implements IFileSystemManager {
 	// in `RedisFsManager`, with a `promises` property
 	public readonly promises: IFileSystemPromises;
 	constructor(
-		redisParam: RedisParams,
+		redisParam: IRedisParameters,
 		redisOptions: IoRedis.RedisOptions,
 		redisFsConfig: RedisFsConfig,
 	) {
@@ -49,14 +50,14 @@ export class RedisFsManager implements IFileSystemManager {
 }
 
 export class RedisFs implements IFileSystemPromises {
-	public readonly redisFsClient: Redis;
+	public readonly redisFsClient: RedisCache;
 	constructor(
-		redisParams: RedisParams,
+		redisParams: IRedisParameters,
 		redisOptions: IoRedis.RedisOptions,
 		private readonly redisFsConfig: RedisFsConfig,
 	) {
 		const redisClient = new IoRedis.default(redisOptions);
-		this.redisFsClient = new Redis(redisClient, redisParams);
+		this.redisFsClient = new RedisCache(redisClient, redisParams);
 	}
 
 	/**
@@ -199,7 +200,7 @@ export class RedisFs implements IFileSystemPromises {
 	): Promise<string[] | Buffer[] | Dirent[]> {
 		const folderpathString = folderpath.toString();
 
-		const result = await executeRedisFsApi(
+		const result: string[] = await executeRedisFsApi(
 			async () => this.redisFsClient.keysByPrefix(folderpathString),
 			RedisFsApis.Readdir,
 			RedisFSConstants.RedisFsApi,
@@ -253,7 +254,7 @@ export class RedisFs implements IFileSystemPromises {
 
 		async function setDirPath(
 			path: string,
-			redisFsClient: Redis,
+			redisFsClient: RedisCache,
 			redisFsConfig: RedisFsConfig,
 		): Promise<void> {
 			await executeRedisFsApi(
