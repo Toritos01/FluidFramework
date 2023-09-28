@@ -169,6 +169,10 @@ export class DocumentStorage implements IDocumentStorage {
 		);
 		let initialSummaryVersionId: string;
 		try {
+			const sumUp1 = Lumberjack.newLumberMetric(
+				`${LumberEventName.CreateDocInitialSummaryWrite}:writeSumTree`,
+				lumberjackProperties,
+			);
 			const handle = await uploadManager.writeSummaryTree(
 				fullTree /* summaryTree */,
 				"" /* parentHandle */,
@@ -176,10 +180,14 @@ export class DocumentStorage implements IDocumentStorage {
 				0 /* sequenceNumber */,
 				true /* initial */,
 			);
-
 			let initialSummaryUploadSuccessMessage = `Tree reference: ${JSON.stringify(handle)}`;
+			sumUp1.success(initialSummaryUploadSuccessMessage);
 
 			if (!this.enableWholeSummaryUpload) {
+				const sumUp2 = Lumberjack.newLumberMetric(
+					`${LumberEventName.CreateDocInitialSummaryWrite}:createCommit`,
+					lumberjackProperties,
+				);
 				const commitParams: ICreateCommitParams = {
 					author: {
 						date: new Date().toISOString(),
@@ -192,10 +200,16 @@ export class DocumentStorage implements IDocumentStorage {
 				};
 
 				const commit = await gitManager.createCommit(commitParams);
+				sumUp2.success("Successfully created commit.");
+				const sumUp3 = Lumberjack.newLumberMetric(
+					`${LumberEventName.CreateDocInitialSummaryWrite}:createRef`,
+					lumberjackProperties,
+				);
 				await gitManager.createRef(documentId, commit.sha);
 				initialSummaryUploadSuccessMessage += ` - Commit sha: ${JSON.stringify(
 					commit.sha,
 				)}`;
+				sumUp3.success(initialSummaryUploadSuccessMessage);
 				// In the case of ShreddedSummary Upload, summary version is always the commit sha.
 				initialSummaryVersionId = commit.sha;
 			} else {
