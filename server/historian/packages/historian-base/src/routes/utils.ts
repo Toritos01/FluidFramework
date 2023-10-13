@@ -106,7 +106,7 @@ export async function createGitService(createArgs: createGitServiceArgs): Promis
 				} catch (e) {
 					Lumberjack.error(
 						`Failed to retrieve static data from document when checking isEphemeral flag.`,
-						getLumberBaseProperties(documentId, tenantId),
+						getLumberBaseProperties(documentId, tenantId), e
 					);
 					isEphemeral = false;
 				}
