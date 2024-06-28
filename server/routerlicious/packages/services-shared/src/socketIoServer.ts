@@ -243,7 +243,7 @@ class SocketIoServer implements core.IWebSocketServer {
 			const drainInterval = this.socketIoConfig?.gracefulShutdownDrainIntervalMs ?? 1000;
 			if (drainTime > 0 && drainInterval > 0) {
 				// Stop receiving new connections
-				this.io.engine.use((_, res, __) => {
+				this.io.engine.use((_, res, __, ___) => {
 					res.status(503).send("Graceful Shutdown");
 				});
 
