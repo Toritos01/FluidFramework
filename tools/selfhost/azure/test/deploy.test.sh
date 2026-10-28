@@ -76,6 +76,9 @@ case "$*" in
   *"redisenterprise database show"*"--query clusteringPolicy"*)          echo "NoCluster"; exit 0 ;;
   *"redisenterprise database show"*"--query port"*)                      echo "10000"; exit 0 ;;
   *"redisenterprise database list-keys"*)                                echo "mock-redis-key"; exit 0 ;;
+  "redisenterprise list "*)
+    if [[ "${MOCK_REDIS_EXISTS:-0}" == 1 ]]; then echo '[{"name":"mock-redis"}]'; else echo '[]'; fi
+    exit 0 ;;
   *"redisenterprise show"*"--query provisioningState"*)
     if [ "${MOCK_REDIS_EXISTS:-0}" = 1 ] || grep -q "redisenterprise create -n" "$CALLS"; then echo "Succeeded"; exit 0; else exit 1; fi ;;
   *"redisenterprise show"*"--query hostName"*)            echo "mock-redis.centralus.redis.azure.net"; exit 0 ;;
@@ -83,6 +86,19 @@ case "$*" in
   *"redisenterprise show"*"--query publicNetworkAccess"*) echo "Disabled"; exit 0 ;;
   *"redisenterprise show"*"--query id"*)                  echo "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Cache/redisEnterprise/mock-redis"; exit 0 ;;
   *"redisenterprise show"*)                               [ "${MOCK_REDIS_EXISTS:-0}" = 1 ] && exit 0 || exit 1 ;;
+  "redis list "*)
+    if [[ "${MOCK_CACHE_EXISTS:-0}" == 1 ]]; then echo '[{"name":"mock-cache"}]'; else echo '[]'; fi
+    exit 0 ;;
+  "redis show "*"--query provisioningState"*) echo "Succeeded"; exit 0 ;;
+  "redis show "*"--query hostName"*) echo "mock-cache.redis.cache.windows.net"; exit 0 ;;
+  "redis show "*)
+    jq -n --arg public "${MOCK_CACHE_PUBLIC:-Disabled}" --arg auth "${MOCK_CACHE_NO_AUTH:-no}" \
+      '{id:"/subscriptions/s/resourceGroups/mock-rg/providers/Microsoft.Cache/Redis/mock-cache",
+        provisioningState:"Succeeded",sku:{name:"Premium",capacity:1},minimumTlsVersion:"1.2",
+        enableNonSslPort:false,publicNetworkAccess:$public,sslPort:6380,
+        redisConfiguration:{"maxmemory-policy":"volatile-lru",authnotrequired:$auth}}'
+    exit 0 ;;
+  "redis list-keys "*) echo "mock-cache-key"; exit 0 ;;
   *"eventhubs namespace show"*"--query zoneRedundant"*)       echo "true"; exit 0 ;;
   *"eventhubs namespace show"*"--query sku.tier"*)            echo "${MOCK_TIER:-Standard}"; exit 0 ;;
   *"eventhubs namespace show"*"--query kafkaEnabled"*)        echo "true"; exit 0 ;;
@@ -92,7 +108,15 @@ case "$*" in
   *"eventhubs eventhub show"*"--query partitionCount"*)       echo "32"; exit 0 ;;
   *"eventhubs eventhub show"*)                                exit 1 ;;
   *"authorization-rule keys list"*)                           echo 'Endpoint=sb://ns.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=abc+/='; exit 0 ;;
+  *"keyvault secret set"*)                                    exit "${MOCK_SECRET_EXIT:-0}" ;;
   *"keyvault secret show"*)                                   echo "https://kv.vault.azure.net/secrets/eventhub-connection-string/1"; exit 0 ;;
+  "group exists "*) echo true; exit 0 ;;
+  "rest --method post "*"/validate?"*)
+    if [[ "${MOCK_PREFLIGHT_FAILURE:-0}" == 1 ]]; then echo "insufficient Redis capacity" >&2; exit 1; fi
+    echo '{"properties":{"provisioningState":"Succeeded"}}'; exit 0 ;;
+  "identity show "*"--query clientId"*) echo mock-client; exit 0 ;;
+  "account show --query tenantId"*) echo mock-tenant; exit 0 ;;
+  "network vnet subnet show "*"--query id"*) echo /subscriptions/s/subnets/pe-subnet; exit 0 ;;
   *"privateLinkServiceConnections"*)                          echo "Approved"; exit 0 ;;
   *"network vnet show"*"--query id"*)                         echo "/subscriptions/s/resourceGroups/mock-rg/providers/Microsoft.Network/virtualNetworks/mock-vnet"; exit 0 ;;
   *"private-dns link vnet list"*)
@@ -104,9 +128,24 @@ exit 0
 STUB
 # git is stubbed too -- deploy.sh fetches the pinned commit at import. Section 9 reaches the real
 # git via $REALPATH when it needs an actual clone.
-for c in kubectl helm docker git; do
+for c in helm docker git; do
   printf '#!/usr/bin/env bash\necho "%s $*" >> "$CALLS"\nexit 0\n' "$c" > "$BIN/$c"
 done
+cat > "$BIN/kubectl" <<'STUB'
+#!/usr/bin/env bash
+echo "kubectl $*" >> "$CALLS"
+case "$*" in
+  *"get nodes --no-headers"*) echo "mock-node Ready";;
+  *"get deployments "*) cat "$MOCK_DEPLOYMENTS";;
+  *"get deployment "*"jsonpath={.spec.replicas}"*) echo "${MOCK_DEPLOYMENT_REPLICAS:-1}";;
+  *"get pods --selector "*)
+    if [[ "${MOCK_PODS_REMAIN:-0}" == 1 ]]; then echo '{"items":[{}]}'
+    elif [[ "${MOCK_PODS_INVALID:-0}" == 1 ]]; then echo '{}'
+    else echo '{"items":[]}'; fi ;;
+  *"get pvc gitrest-data "*) echo Bound;;
+esac
+exit 0
+STUB
 chmod +x "$BIN"/*
 REALPATH="$PATH"
 export PATH="$BIN:$PATH"
@@ -331,6 +370,57 @@ assert_eq "Managed Redis supports explicitly disabled HA" "$rc" "0"
 assert_has "Managed Redis passes disabled HA to Azure" "$CALLS" "--high-availability Disabled"
 export MOCK_REDIS_HA=Enabled
 
+CACHE_PARAMS="$WORK/params-cache.json"
+jq '.redis = {useDeprecated:true,clusterName:"mock-cache",sku:"Premium",capacity:1}' "$PARAMS" > "$CACHE_PARAMS"
+: > "$CALLS"
+out="$(run_phase 'phase8_redis' "$CACHE_PARAMS")"; rc=$?
+assert_eq "Azure Cache fallback provisioning exits 0" "$rc" "0"
+assert_has "Azure Cache uses ARM creation with private access from the start" "$CALLS" "deployment group create"
+assert_has "Azure Cache uses the redisCache private endpoint group" "$CALLS" "--group-id redisCache"
+assert_has "Azure Cache uses its own private DNS zone" "$CALLS" "privatelink.redis.cache.windows.net"
+assert_has "Azure Cache retrieves its own access key" "$CALLS" "redis list-keys"
+assert_eq "Azure Cache uses TLS port 6380" "$(read_vars "$CACHE_PARAMS" REDIS_PORT | sed 's/REDIS_PORT=//')" "6380"
+if grep -q "redisenterprise" "$CALLS"; then no "Azure Cache does not require the AMR extension"
+else ok "Azure Cache does not require the AMR extension"; fi
+assert_has "Azure Cache warns about retirement" <(printf '%s' "$out") "September 30, 2028"
+
+: > "$CALLS"; export MOCK_CACHE_EXISTS=1
+out="$(run_phase 'phase8_redis' "$CACHE_PARAMS")"; rc=$?
+assert_eq "Azure Cache re-run exits 0" "$rc" "0"
+if grep -q "deployment group create" "$CALLS"; then no "Azure Cache re-run does not recreate the cache"
+else ok "Azure Cache re-run does not recreate the cache"; fi
+export MOCK_CACHE_EXISTS=0
+
+for incompatible in public no-auth; do
+  : > "$CALLS"
+  if [[ "$incompatible" == public ]]; then export MOCK_CACHE_PUBLIC=Enabled
+  else export MOCK_CACHE_NO_AUTH=yes; fi
+  out="$(run_phase 'phase8_redis' "$CACHE_PARAMS")"; rc=$?
+  [[ "$rc" != 0 ]] && ok "incompatible $incompatible cache is rejected" || no "incompatible $incompatible cache is rejected"
+  if grep -q 'keyvault secret set' "$CALLS"; then no "incompatible cache does not publish credentials"
+  else ok "incompatible cache does not publish credentials"; fi
+  export MOCK_CACHE_PUBLIC=Disabled MOCK_CACHE_NO_AUTH=no
+done
+
+: > "$CALLS"
+out="$(run_phase 'initialize_deploy_only_mode' "$CACHE_PARAMS")"; rc=$?
+assert_eq "deploy-only resolves Azure Cache without AMR calls" "$rc" "0"
+assert_has "deploy-only uses the Azure Cache hostname" <(printf '%s' "$out") "mock-cache.redis.cache.windows.net"
+
+for legacy in false true; do
+  if [[ "$legacy" == true ]]; then
+    sed 's/<REDIS_PORT>/10000/g' "$AZURE_DIR/backends.yaml" > "$REL_DIR/deployment/azure/backends.yaml"
+  fi
+  : > "$CALLS"
+  out="$(run_phase 'resolve_redis_hostname; phase4_backends; cat "$DEPLOY_DIR/backends.yaml"' "$CACHE_PARAMS")"; rc=$?
+  assert_eq "backend rendering succeeds (legacy=$legacy)" "$rc" "0"
+  assert_eq "all three backend Redis ports use 6380 (legacy=$legacy)" \
+    "$(grep -c '__port, value: "6380"' <<<"$out")" "3"
+  assert_eq "both backends and throttling use the cache hostname (legacy=$legacy)" \
+    "$(grep -c '__host, value: "mock-cache.redis.cache.windows.net"' <<<"$out")" "3"
+done
+cp "$AZURE_DIR/backends.yaml" "$REL_DIR/deployment/azure/backends.yaml"
+
 # ---------------------------------------------------------------------------
 group "5. Guard rails"
 # ---------------------------------------------------------------------------
@@ -533,6 +623,7 @@ PY
 
 VALS="$WORK/values.yaml"
 sed -e "s|<ACR>|mockacr|g" -e "s|<IMAGE_TAG>|t1|g" -e "s|<REDIS_HOSTNAME>|r.centralus.redis.azure.net|g" \
+    -e "s|<REDIS_PORT>|10000|g" \
     -e "s|<KAFKA_ENDPOINT>|mock-eventhubs.servicebus.windows.net:9093|g" \
     -e "s|<ALFRED_EXTERNAL_URL>|http://a|g" -e "s|<NEXUS_EXTERNAL_URL>|http://n|g" \
     -e "s|<HISTORIAN_EXTERNAL_URL>|http://h|g" "$AZURE_DIR/routerlicious-values.yaml" > "$VALS"
@@ -647,6 +738,23 @@ if PATH="$REALPATH" command -v helm >/dev/null 2>&1 && PATH="$REALPATH" command 
            print $0 ","; print "                \"eventHubConnString\": \"\""; next } { print }' "$T" > "$T.t" && mv "$T.t" "$T"
     grep -qF 'eventHubConnString' "$T" && ok "chart patch applies to a fresh upstream clone" \
                                        || no "chart patch applies to a fresh upstream clone" "upstream anchor may have changed"
+    mkdir -p "$WORK/fluid/server/routerlicious/kubernetes"
+    cp -R "$CH" "$WORK/fluid/server/routerlicious/kubernetes/"
+    for legacy in false true; do
+      if [[ "$legacy" == true ]]; then
+        sed 's/<REDIS_PORT>/10000/g' "$AZURE_DIR/routerlicious-values.yaml" > "$REL_DIR/deployment/azure/routerlicious-values.yaml"
+      fi
+      : > "$CALLS"
+      out="$(MOCK_DEPLOYMENT_REPLICAS=0 run_phase 'resolve_redis_hostname; phase5_helm; cat "$DEPLOY_DIR/routerlicious-values.yaml"' "$CACHE_PARAMS")"; rc=$?
+      assert_eq "real Helm phase renders cache values (legacy=$legacy)" "$rc" "0"
+      assert_eq "all four logical caches use 6380 (legacy=$legacy)" "$(grep -c '^  port: 6380$' <<<"$out")" "4"
+      assert_eq "all four logical caches use the fallback hostname (legacy=$legacy)" \
+        "$(grep -c '^  url: mock-cache.redis.cache.windows.net$' <<<"$out")" "4"
+      for service in alfred nexus riddler deli scribe scriptorium; do
+        assert_has "stopped $service is explicitly restarted (legacy=$legacy)" "$CALLS" "scale deployment fluid-$service --replicas="
+      done
+    done
+    cp "$AZURE_DIR/routerlicious-values.yaml" "$REL_DIR/deployment/azure/routerlicious-values.yaml"
     if PATH="$REALPATH" helm template r "$CH" -f "$VALS" > "$WORK/render.yaml" 2>"$WORK/render.err"; then
       ok "helm template renders the patched chart"
       absorb < <(python3 - "$WORK/render.yaml" <<'PY'
@@ -684,8 +792,8 @@ grep -q "has no Kafka endpoint"        "$P" && ok "preflight rejects the Basic S
 grep -q "no Availability Zone support" "$P" && ok "preflight gates zoneRedundant on region AZ support"  || no "preflight gates zoneRedundant on region AZ support"
 grep -q "create-time only"             "$P" && ok "preflight warns zoneRedundant cannot change later"   || no "preflight warns zoneRedundant cannot change later"
 grep -q "Microsoft.Cache/redisEnterprise" "$P" && ok "preflight checks Azure Managed Redis names"       || no "preflight checks Azure Managed Redis names"
-grep -q "REDIS_HIGH_AVAILABILITY STORAGE" "$P" && ok "preflight requires Redis highAvailability"         || no "preflight requires Redis highAvailability"
-grep -q "must be exactly 'Enabled' or 'Disabled'" "$P" && ok "preflight validates Redis highAvailability" || no "preflight validates Redis highAvailability"
+grep -q 'load_redis_config "$PARAMS_FILE"' "$P" && ok "preflight uses shared Redis config validation" || no "preflight uses shared Redis config validation"
+grep -q "must be exactly 'Enabled' or 'Disabled'" "$AZURE_DIR/redis-helpers.sh" && ok "preflight validates Redis highAvailability" || no "preflight validates Redis highAvailability"
 
 PREFLIGHT_FAIL_BIN="$WORK/preflight-fail-bin"
 mkdir -p "$PREFLIGHT_FAIL_BIN"
@@ -702,6 +810,109 @@ if grep -qF "ERROR: could not create a private preflight temporary directory." <
 else
   no "preflight reports temporary-directory creation failures" "$preflight_mktemp_out"
 fi
+
+group "12. Redis migration"
+export MOCK_DEPLOYMENT_REPLICAS=0
+export MOCK_SOURCE_PARAMS="$CACHE_PARAMS"
+export MOCK_DEPLOYMENTS="$WORK/deployments.json"
+jq -n '{
+  items: [("fluid-alfred","fluid-nexus","fluid-riddler","fluid-deli","fluid-scribe","fluid-scriptorium","gitrest","historian") as $name |
+    {metadata:{name:$name}, spec:{
+      selector:{matchLabels:{app:$name}},
+      template:{spec:{containers:[{
+        name:$name,
+        image:("mockacr.azurecr.io/" + (if ($name | startswith("fluid-")) then "routerlicious" else $name end) + ":mock-tag"),
+        env:[{name:"redis__host",value:"mock-cache.redis.cache.windows.net"}]
+      }]}}
+    }}]
+}' > "$MOCK_DEPLOYMENTS"
+
+run_migration() {
+  run_phase '
+    . "$SELFHOST_ROOT/azure/migrate-redis.sh"
+    REDIS_SOURCE_PARAMS="$MOCK_SOURCE_PARAMS"
+    phase8_keyvault() { echo "migration keyvault permissions" >> "$CALLS"; }
+    phase8_keyvault_lockdown() { echo "migration keyvault lockdown" >> "$CALLS"; }
+    probe_managed_redis() { echo "migration probe" >> "$CALLS"; return "${MOCK_PROBE_FAILURE:-0}"; }
+    phase4_secrets_infra() { echo "migration secrets infra" >> "$CALLS"; }
+    phase5_helm() { echo "migration helm $REDIS_HOSTNAME:$REDIS_PORT" >> "$CALLS"; return "${MOCK_HELM_FAILURE:-0}"; }
+    phase10_hpa() { echo "migration hpa" >> "$CALLS"; }
+    publish_frontdoor_hostnames() { echo "migration frontdoor" >> "$CALLS"; }
+    verify_frontdoor_origin_health() { echo "migration healthy" >> "$CALLS"; }
+    migrate_redis
+  ' "${1:-$PARAMS}"
+}
+
+: > "$CALLS"
+out="$(run_migration)"; rc=$?
+assert_eq "Redis migration completes against mocked infrastructure" "$rc" "0"
+assert_has "migration retains old cache for manual deletion" <(printf '%s' "$out") "Neither Redis resource was deleted"
+assert_has "migration applies AMR credentials" "$CALLS" "keyvault secret set --vault-name mock-kv --name redis-password --file"
+assert_has "migration applies AMR endpoint and port to Helm" "$CALLS" "migration helm mock-redis.centralus.redis.azure.net:10000"
+assert_eq "migration waits for all eight workloads to roll out" "$(grep -c 'rollout status deployment/' "$CALLS")" "8"
+assert_eq "migration waits for all eight old pod selectors to disappear" "$(grep -c 'wait --for=delete pod --selector' "$CALLS")" "8"
+assert_has "migration explicitly restarts stopped gitrest" "$CALLS" "scale deployment gitrest --replicas=1"
+assert_has "migration explicitly restarts stopped historian" "$CALLS" "scale deployment historian --replicas="
+absorb < <(python3 - "$CALLS" <<'PY'
+import sys
+calls = open(sys.argv[1]).read().splitlines()
+find = lambda text: next(i for i, line in enumerate(calls) if text in line)
+checks = [
+    ("AMR provider validation precedes creation", find("/validate?") < find("redisenterprise create -n")),
+    ("AMR provisioning and connectivity probe precede stopping workloads", find("redisenterprise create -n") < find("migration probe") < find("scale deployment")),
+    ("all old pods are gone before changing the live key", max(i for i, line in enumerate(calls) if "get pods --selector" in line) < find("keyvault secret set")),
+    ("key switch precedes consumers restarting", find("keyvault secret set") < find("apply -f") < find("migration helm")),
+    ("migration checks application health last", find("rollout status") < find("migration healthy")),
+    ("neither Redis resource is deleted", not any("redis delete" in line or "redisenterprise delete" in line for line in calls)),
+]
+for name, passed in checks:
+    print(("PASS " if passed else "FAIL ") + name)
+PY
+)
+
+for scenario in capacity probe pods invalid-pods secret helm existing-target wrong-release mismatched-config; do
+  export MOCK_PREFLIGHT_FAILURE=0 MOCK_PROBE_FAILURE=0 MOCK_PODS_REMAIN=0 MOCK_PODS_INVALID=0 MOCK_SECRET_EXIT=0 MOCK_HELM_FAILURE=0 MOCK_REDIS_EXISTS=0
+  target="$PARAMS"
+  case "$scenario" in
+    capacity) export MOCK_PREFLIGHT_FAILURE=1 ;;
+    probe) export MOCK_PROBE_FAILURE=1 ;;
+    pods) export MOCK_PODS_REMAIN=1 ;;
+    invalid-pods) export MOCK_PODS_INVALID=1 ;;
+    secret) export MOCK_SECRET_EXIT=1 ;;
+    helm) export MOCK_HELM_FAILURE=1 ;;
+    existing-target) export MOCK_REDIS_EXISTS=1 ;;
+    wrong-release)
+      jq '.items[7].spec.template.spec.containers[0].image = "mockacr.azurecr.io/historian:other-tag"' \
+        "$MOCK_DEPLOYMENTS" > "$WORK/wrong-release.json"
+      mv "$MOCK_DEPLOYMENTS" "$WORK/correct-deployments.json"
+      cp "$WORK/wrong-release.json" "$MOCK_DEPLOYMENTS" ;;
+    mismatched-config)
+      target="$WORK/mismatched.json"
+      jq '.resourceGroup = "different-rg"' "$PARAMS" > "$target" ;;
+  esac
+  : > "$CALLS"
+  out="$(run_migration "$target")"; rc=$?
+  [[ "$rc" != 0 ]] && ok "migration rejects $scenario" || no "migration rejects $scenario" "$out"
+  case "$scenario" in
+    capacity|existing-target|wrong-release|mismatched-config)
+      if grep -q 'redisenterprise create -n\|keyvault secret set\|scale deployment' "$CALLS"; then
+        no "$scenario failure occurs before resource creation or live changes"
+      else ok "$scenario failure occurs before resource creation or live changes"; fi ;;
+    probe)
+      if grep -q 'keyvault secret set\|scale deployment' "$CALLS"; then no "probe failure leaves source consumers untouched"
+      else ok "probe failure leaves source consumers untouched"; fi ;;
+    pods|invalid-pods)
+      if grep -q 'keyvault secret set' "$CALLS"; then no "remaining source pods prevent key switch"
+      else ok "remaining source pods prevent key switch"; fi ;;
+  esac
+  case "$scenario" in
+    pods|invalid-pods|secret|helm)
+      assert_eq "$scenario failure freezes all workloads instead of splitting Pub/Sub" "$(grep -c 'scale deployment fluid-alfred fluid-nexus' "$CALLS")" "2"
+      assert_has "$scenario failure identifies persistent recovery instructions" <(printf '%s' "$out") "redis-migration-recovery.txt" ;;
+    wrong-release) mv "$WORK/correct-deployments.json" "$MOCK_DEPLOYMENTS" ;;
+  esac
+done
+export MOCK_PREFLIGHT_FAILURE=0 MOCK_PROBE_FAILURE=0 MOCK_PODS_REMAIN=0 MOCK_PODS_INVALID=0 MOCK_SECRET_EXIT=0 MOCK_HELM_FAILURE=0 MOCK_REDIS_EXISTS=0
 
 printf '\n\033[1mTotal: %d passed, %d failed, %d skipped\033[0m\n' "$PASS" "$FAIL" "$SKIP"
 [[ $FAIL -eq 0 ]] || exit 1
