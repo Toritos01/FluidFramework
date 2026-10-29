@@ -242,20 +242,13 @@ The deployment uses a private endpoint, disables public and non-TLS access from 
 It never silently switches services after a failed allocation.
 Use the same selected parameters for subsequent deployments.
 
-**This is a temporary bridge, not a universally available alternative.**
-According to Microsoft's [July 2026 creation-policy update](https://learn.microsoft.com/en-us/azure/azure-cache-for-redis/cache-whats-new#july-2026),
-new public-cloud customers have been blocked from creating Azure Cache for Redis since April 1, 2026.
-A tenant qualifies as an existing customer if any subscription in it had an Azure Cache for Redis instance before that date.
-Using Azure Fluid Relay alone does **not** establish that eligibility.
-Qualifying public-cloud tenants can create caches until retirement on **September 30, 2028**.
-Azure Government and Azure operated by 21Vianet have no creation block before that retirement date.
-This policy does not guarantee regional capacity or that every other dependency in this self-host deployment supports sovereign clouds.
-Check the current policy and subscription eligibility before relying on this fallback.
+**This is a temporary bridge.**
+Azure Cache for Redis retires on **September 30, 2028**.
+Check regional capacity and availability of the other Azure services required by this deployment before relying on this fallback.
 
 ### Migrating the fallback to Azure Managed Redis
 
 Use `azure/migrate-redis.sh` when AMR capacity becomes available.
-This operates on your self-hosted deployment, not on Azure Fluid Relay's caches.
 Keep the existing Azure Cache parameters unchanged for recovery, and create a second file that differs **only** in its `redis` block:
 
 ```bash
@@ -270,6 +263,21 @@ jq '.redis = {
 bash azure/migrate-redis.sh <currently-deployed-release-id> \
   azure/deploy.parameters.json azure/deploy.parameters.amr.json --yes
 ```
+
+The migration command takes these arguments:
+
+| Argument | Purpose |
+| --- | --- |
+| `<currently-deployed-release-id>` | The ID of the release already running on AKS, corresponding to the local `release-artifacts/<currently-deployed-release-id>/` directory. This is not the source Git tag, container image tag, or Azure resource name. |
+| `azure/deploy.parameters.json` | The existing deployment configuration using Azure Cache for Redis (`redis.useDeprecated: true`). Keep this file unchanged so it can also be used for recovery or rollback. Pass your actual file path if you deployed with a custom parameters file. |
+| `azure/deploy.parameters.amr.json` | The target configuration using Azure Managed Redis (`redis.useDeprecated: false`). It must match the source configuration outside the `redis` block and specify a new cache name and the desired AMR region/SKU. |
+| `--yes` | Required confirmation that you have scheduled a maintenance window and accept downtime. |
+
+Keep the existing release bundle available locally.
+The script uses its pinned source, image metadata, and deployment manifests to verify the running workload image references and redeploy the same application release with the new Redis connections.
+Both digest-pinned references and the corresponding per-image release tags are accepted, but images from another release or deployment registry are rejected.
+It also includes that release ID in its recovery commands; it does not build a new release as part of migration.
+For example, if the deployed bundle is `release-artifacts/r0.1.0/`, pass `r0.1.0`.
 
 Choose an available region/SKU and a **new** cache name.
 Run from `tools/selfhost` with the same prerequisites and permissions as deployment.
@@ -293,7 +301,15 @@ It prints the location of `redis-migration-recovery.txt`, which contains the sou
 Before recovery, confirm all eight deployments have zero replicas and their pods have disappeared; resolve any cleanup stop/wait errors manually first.
 Use **full** deployment mode for recovery; deploy-only does not restore the cache key.
 If preparation fails before stopping workloads, the original connection remains unchanged, but a newly created AMR may remain billable.
-To retry migration in that case, explicitly remove the unused target AMR yourself or choose another new name.
+To retry a preparation failure, rerun the same migration command with the same release and parameter files.
+The script reuses a target AMR that matches the requested region, SKU, high availability, and disabled public access, then verifies its database settings.
+It waits for in-progress provisioning, creates a missing database, retries provisioning of a failed private endpoint, and repairs missing private DNS configuration.
+It does not delete either cache or the private endpoint.
+An existing private endpoint must match the target resource, connection group, and subnet before it can be reused or retried.
+If Azure still rejects provisioning, the script stops before changing the original connection; correct the reported problem before retrying.
+Failed AMR clusters and incompatible existing resources require explicit repair or a different target name.
+Before stopping workloads, the script saves a cutover marker on the target AMR.
+If that marker exists, rerunning migration is refused; use the recovery instructions instead.
 Keep both parameter files and both caches until you have validated the chosen recovery path.
 
 ### Sizing and cost

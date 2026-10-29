@@ -17,6 +17,29 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     --redis-source-parameters "$2" --confirm-redis-migration "$1" "$3"
 fi
 
+validate_redis_migration_workloads() {
+  local source_hostname="$1" deployments_file="$2"
+  jq -e --arg host "$source_hostname" --arg registry "$ACR.azurecr.io" \
+    --slurpfile release "$IMAGES_FILE" '
+    (.items | length) == 8 and
+    all(.items[]; (.spec.selector.matchLabels | length) > 0) and
+    all(.items[];
+      (.metadata.name | if startswith("fluid-") then "routerlicious" else . end) as $component |
+      [$release[0].builtImages[]? | select(.name == $component and .status == "pinned")] as $images |
+      ($images | length) == 1 and
+      any(.spec.template.spec.containers[];
+        (($images[0].tag | type) == "string" and ($images[0].tag | length) > 0 and
+          .image == ($registry + "/" + $component + ":" + $images[0].tag)) or
+        (($images[0].digest // "" | test("^sha256:[0-9a-f]{64}$")) and
+          .image == ($registry + "/" + $component + "@" + $images[0].digest)))) and
+    any(.items[]; .metadata.name == "gitrest" and
+      any(.spec.template.spec.containers[].env[]?; .name == "redis__host" and .value == $host))
+  ' "$deployments_file" >/dev/null || {
+    echo "ERROR: running workloads do not match the source cache and existing release. Check all eight workload images against images.json in the currently deployed release bundle and verify the source Redis hostname." >&2
+    return 1
+  }
+}
+
 stop_redis_workloads() {
   local name selector
   kubectl scale deployment "${REDIS_MIGRATION_DEPLOYMENTS[@]}" --replicas=0 || return 1
@@ -95,7 +118,7 @@ migrate_redis() {
     echo "ERROR: source and target parameters must differ only in the redis block." >&2
     return 1
   fi
-  local source_name source_hostname target_caches
+  local source_name source_hostname target_caches target_cache target_id
   source_name="$(jq -r '.redis.clusterName' "$REDIS_SOURCE_PARAMS")"
   [[ "$source_name" != "$REDIS" ]] || { echo "ERROR: choose a different AMR clusterName; the source cache is retained." >&2; return 1; }
   bash "$SELFHOST_ROOT/azure/validate-names.sh" "$PARAMS_FILE"
@@ -106,9 +129,23 @@ migrate_redis() {
   source_hostname="$(az redis show -n "$source_name" -g "$RG" --query hostName -o tsv)"
   [[ -n "$source_hostname" ]] || { echo "ERROR: source Azure Cache for Redis returned no hostname." >&2; return 1; }
   target_caches="$(az redisenterprise list -g "$RG" --subscription "$SUB" -o json)"
-  if ! jq -e --arg name "$REDIS" 'type == "array" and all(.[]; .name != $name)' <<<"$target_caches" >/dev/null; then
-    echo "ERROR: migration requires a new AMR name. For a previous partial migration, use its recovery instructions rather than reusing an unknown cache." >&2
-    return 1
+  target_cache="$(jq -c --arg name "$REDIS" '
+    if type == "array" then [.[] | select(.name == $name)][0]
+    else error("Expected an Azure Managed Redis resource list") end
+  ' <<<"$target_caches")" || return 1
+  if [[ "$target_cache" != null ]]; then
+    if ! jq -e '((.tags // {}) | has("selfhostRedisMigrationCutover")) | not' <<<"$target_cache" >/dev/null; then
+      echo "ERROR: this AMR target has already entered cutover. Use the previous redis-migration-recovery.txt instructions to finish or roll back; do not restart migration." >&2
+      return 1
+    fi
+    if ! jq -e --arg location "$REDIS_LOC" --arg sku "$REDIS_SKU" --arg ha "$REDIS_HIGH_AVAILABILITY" '
+      (.location | ascii_downcase | gsub(" "; "")) == ($location | ascii_downcase | gsub(" "; "")) and
+      .sku.name == $sku and .highAvailability == $ha and .publicNetworkAccess == "Disabled"
+    ' <<<"$target_cache" >/dev/null; then
+      echo "ERROR: existing AMR target does not match the requested region, SKU, high availability, and disabled public access. Resolve it explicitly or choose a new target name." >&2
+      return 1
+    fi
+    log "Reusing existing AMR target $REDIS; its database and private endpoint will be verified before cutover."
   fi
 
   local FAILURES=0 PREFLIGHT_TEMP_DIR="$DEPLOY_DIR"
@@ -116,22 +153,21 @@ migrate_redis() {
   note() { log "$*"; }
   ok() { log "$*"; }
   . "$SELFHOST_ROOT/azure/preflight-helpers.sh"
-  check_redis_capacity
+  if [[ "$target_cache" == null ]]; then
+    check_redis_capacity
+  else
+    log "AMR target already exists; skipping the creation-capacity check."
+  fi
   [[ "$FAILURES" == 0 ]] || return 1
 
   az aks get-credentials -g "$RG" -n "$AKS" --overwrite-existing
   REDIS_MIGRATION_DEPLOYMENTS=(fluid-alfred fluid-nexus fluid-riddler fluid-deli fluid-scribe fluid-scriptorium gitrest historian)
   kubectl get deployments "${REDIS_MIGRATION_DEPLOYMENTS[@]}" -o json > "$DEPLOY_DIR/redis-source-deployments.json"
-  jq -e --arg host "$source_hostname" --arg registry "$ACR.azurecr.io" --arg tag "$IMAGE_TAG" '
-    (.items | length) == 8 and
-    all(.items[]; (.spec.selector.matchLabels | length) > 0) and
-    all(.items[];
-      (.metadata.name | if startswith("fluid-") then "routerlicious" else . end) as $component |
-      any(.spec.template.spec.containers[]; .image == ($registry + "/" + $component + ":" + $tag))) and
-    any(.items[]; .metadata.name == "gitrest" and
-      any(.spec.template.spec.containers[].env[]?; .name == "redis__host" and .value == $host))
-  ' "$DEPLOY_DIR/redis-source-deployments.json" >/dev/null ||
-    { echo "ERROR: running workloads do not match the source cache and existing release. Use the currently deployed release ID." >&2; return 1; }
+  validate_redis_migration_workloads "$source_hostname" "$DEPLOY_DIR/redis-source-deployments.json" || return 1
+  if ! jq -e 'all(.items[]; (.spec.replicas // 1) > 0)' "$DEPLOY_DIR/redis-source-deployments.json" >/dev/null; then
+    echo "ERROR: source workloads are stopped. Use the previous redis-migration-recovery.txt instructions instead of restarting migration." >&2
+    return 1
+  fi
   PE_SUBNET_ID="$(az network vnet subnet show -g "$RG" --vnet-name "$VNET" -n pe-subnet --query id -o tsv)"
   [[ -n "$PE_SUBNET_ID" ]] || { echo "ERROR: existing private-endpoint subnet was not found." >&2; return 1; }
 
@@ -162,6 +198,11 @@ To roll back, run from tools/selfhost:
 Full mode republishes the selected cache's key and endpoints; deploy-only does not repair keys.
 Do not delete either cache until application validation succeeds.
 EOF
+  target_id="$(az redisenterprise show -n "$REDIS" -g "$RG" --query id -o tsv)"
+  [[ -n "$target_id" ]] || { echo "ERROR: AMR returned no resource ID; refusing to start cutover." >&2; return 1; }
+  # Persist the recovery boundary in Azure before stopping consumers, including across machines.
+  az tag update --resource-id "$target_id" --operation Merge \
+    --tags "selfhostRedisMigrationCutover=$RELEASE_ID" >/dev/null
   log "Starting maintenance window: stopping all eight workloads; Redis data is NOT copied."
   REDIS_MIGRATION_STOPPED=true
   stop_redis_workloads

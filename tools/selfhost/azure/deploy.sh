@@ -847,7 +847,33 @@ phase0_network_allow_frontdoor() {
 create_private_endpoint() {
   local resource_id="$1" group_id="$2" short_name="$3" zone_name="$4"
   local pe_name="pe-$short_name" zone_link_name="link-$short_name"
-  local vnet_id existing_zone_link
+  local vnet_id existing_zone_link endpoints endpoint pe_state
+
+  endpoints="$(az network private-endpoint list -g "$RG" -o json)"
+  endpoint="$(jq -c --arg name "$pe_name" '
+    if type == "array" then [.[] | select(.name == $name)][0]
+    else error("Expected a private endpoint list") end
+  ' <<<"$endpoints")"
+  pe_state=""
+  if [[ "$endpoint" != null ]]; then
+    if ! jq -e --arg resource "$resource_id" --arg subnet "$PE_SUBNET_ID" --arg group "$group_id" '
+      (.subnet.id | ascii_downcase) == ($subnet | ascii_downcase) and
+      (.privateLinkServiceConnections | length) == 1 and
+      (.privateLinkServiceConnections[0].privateLinkServiceId | ascii_downcase) == ($resource | ascii_downcase) and
+      .privateLinkServiceConnections[0].groupIds == [$group] and
+      ((.manualPrivateLinkServiceConnections // []) | length) == 0
+    ' <<<"$endpoint" >/dev/null; then
+      echo "ERROR: private endpoint $pe_name does not match the requested resource, group, and subnet; refusing to modify it." >&2
+      return 1
+    fi
+    pe_state="$(jq -r '.provisioningState' <<<"$endpoint")"
+    case "$pe_state" in
+      Succeeded) log "Private endpoint $pe_name already exists, skipping create" ;;
+      Failed) log "Retrying provisioning of failed private endpoint $pe_name without deleting it" ;;
+      Creating|Updating) log "Waiting for existing private endpoint $pe_name ($pe_state)" ;;
+      *) echo "ERROR: private endpoint $pe_name is in state '$pe_state'; resolve it before retrying." >&2; return 1 ;;
+    esac
+  fi
 
   if ! az network private-dns zone show -g "$RG" -n "$zone_name" >/dev/null 2>&1; then
     az network private-dns zone create -g "$RG" -n "$zone_name"
@@ -862,13 +888,12 @@ create_private_endpoint() {
       -v "$VNET" -e false
   fi
 
-  if az network private-endpoint show -g "$RG" -n "$pe_name" >/dev/null 2>&1; then
-    log "Private endpoint $pe_name already exists, skipping create"
-  else
+  if [[ "$endpoint" == null || "$pe_state" == Failed ]]; then
     az network private-endpoint create -g "$RG" -n "$pe_name" -l "$AKS_LOC" \
       --subnet "$PE_SUBNET_ID" --private-connection-resource-id "$resource_id" \
       --group-id "$group_id" --connection-name "${pe_name}-conn"
   fi
+  az network private-endpoint wait -g "$RG" -n "$pe_name" --created --interval 10 --timeout 600
 
   # Same-subscription/tenant private endpoints auto-approve when the requester already has
   # sufficient RBAC on the target resource -- check and surface it rather than assume, since a
@@ -880,7 +905,10 @@ create_private_endpoint() {
     || { echo "ERROR: private endpoint $pe_name connection status is '$pe_status', not Approved" >&2; exit 1; }
 
   az network private-endpoint dns-zone-group create -g "$RG" --endpoint-name "$pe_name" \
-    --name default --private-dns-zone "$zone_name" --zone-name "$short_name" >/dev/null 2>&1 || true
+    --name default --private-dns-zone "$zone_name" --zone-name "$short_name" >/dev/null || {
+    echo "ERROR: could not configure private DNS for $pe_name; fix the reported error and rerun." >&2
+    return 1
+  }
   log "Private endpoint $pe_name -> $zone_name VERIFY passed ($pe_status)"
 }
 
@@ -1397,7 +1425,7 @@ provision_managed_redis() {
   # enabled and the key follows the existing Key Vault + CSI path. Entra ID remains the preferred
   # Azure authentication model, but adopting it requires token refresh support in the Fluid
   # server client and is deliberately not approximated in deployment configuration.
-  local existing_state cluster_ha cluster_public database_state database_auth database_protocol database_clustering database_port
+  local existing_state cluster_ha cluster_public database_state database_auth database_protocol database_clustering database_port database_eviction attempt
   existing_state="$(az redisenterprise show -n "$REDIS" -g "$RG" --query provisioningState -o tsv 2>/dev/null || true)"
   if [[ -z "$existing_state" ]]; then
     az redisenterprise create -n "$REDIS" -g "$RG" -l "$REDIS_LOC" \
@@ -1410,6 +1438,9 @@ provision_managed_redis() {
       --clustering-policy NoCluster \
       --eviction-policy VolatileLRU \
       --port "$REDIS_PORT"
+  elif [[ "$existing_state" == Creating || "$existing_state" == Updating ]]; then
+    log "Waiting for existing Azure Managed Redis $REDIS ($existing_state)"
+    az redisenterprise wait -n "$REDIS" -g "$RG" --created --interval 30 --timeout 1800
   elif [[ "$existing_state" != "Succeeded" ]]; then
     echo "ERROR: Azure Managed Redis $REDIS exists in provisioning state '$existing_state'." >&2
     echo "Resolve or delete the failed resource explicitly, then rerun; deploy.sh will not destroy it automatically." >&2
@@ -1431,11 +1462,32 @@ provision_managed_redis() {
     }
   fi
 
-  database_state="$(az redisenterprise database show --cluster-name "$REDIS" -g "$RG" --query provisioningState -o tsv 2>/dev/null || true)"
+  for attempt in {1..60}; do
+    database_state="$(az redisenterprise database list --cluster-name "$REDIS" -g "$RG" \
+      --query "[?name=='default'] | [0].provisioningState" -o tsv)"
+    [[ "$database_state" == Creating || "$database_state" == Updating ]] || break
+    log "Waiting for existing AMR database ($database_state, attempt $attempt/60)"
+    sleep 10
+  done
+  if [[ "$database_state" == Creating || "$database_state" == Updating ]]; then
+    echo "ERROR: timed out waiting for the AMR database; inspect its provisioning state and rerun after it succeeds." >&2
+    return 1
+  fi
+  if [[ -z "$database_state" ]]; then
+    az redisenterprise database create --cluster-name "$REDIS" -g "$RG" \
+      --access-keys-authentication Enabled --client-protocol Encrypted \
+      --clustering-policy NoCluster --eviction-policy VolatileLRU --port "$REDIS_PORT"
+    database_state="$(az redisenterprise database show --cluster-name "$REDIS" -g "$RG" --query provisioningState -o tsv)"
+  fi
+  if [[ "$database_state" != Succeeded ]]; then
+    echo "ERROR: AMR database is in provisioning state '$database_state'; resolve it explicitly before rerunning." >&2
+    return 1
+  fi
   database_auth="$(az redisenterprise database show --cluster-name "$REDIS" -g "$RG" --query accessKeysAuthentication -o tsv 2>/dev/null || true)"
   database_protocol="$(az redisenterprise database show --cluster-name "$REDIS" -g "$RG" --query clientProtocol -o tsv 2>/dev/null || true)"
   database_clustering="$(az redisenterprise database show --cluster-name "$REDIS" -g "$RG" --query clusteringPolicy -o tsv 2>/dev/null || true)"
   database_port="$(az redisenterprise database show --cluster-name "$REDIS" -g "$RG" --query port -o tsv 2>/dev/null || true)"
+  database_eviction="$(az redisenterprise database show --cluster-name "$REDIS" -g "$RG" --query evictionPolicy -o tsv)"
   if [[ "$database_auth" != "Enabled" || "$database_protocol" != "Encrypted" ]]; then
     az redisenterprise database update --cluster-name "$REDIS" -g "$RG" \
       --access-keys-authentication Enabled --client-protocol Encrypted >/dev/null
@@ -1444,9 +1496,9 @@ provision_managed_redis() {
   fi
   [[ "$database_state" == "Succeeded" && "$database_auth" == "Enabled" \
       && "$database_protocol" == "Encrypted" && "$database_clustering" == "NoCluster" \
-      && "$database_port" == "$REDIS_PORT" ]] || {
+      && "$database_port" == "$REDIS_PORT" && "$database_eviction" == VolatileLRU ]] || {
     echo "ERROR: Azure Managed Redis $REDIS/default is incompatible with Fluid." >&2
-    echo "Expected Succeeded/Enabled/Encrypted/NoCluster/$REDIS_PORT; got $database_state/$database_auth/$database_protocol/$database_clustering/$database_port." >&2
+    echo "Expected Succeeded/Enabled/Encrypted/NoCluster/$REDIS_PORT/VolatileLRU; got $database_state/$database_auth/$database_protocol/$database_clustering/$database_port/$database_eviction." >&2
     echo "These database creation settings cannot all be changed in place; create a compatible instance." >&2
     exit 1
   }
@@ -1482,7 +1534,7 @@ provision_redis_cache() {
       .publicNetworkAccess == "Disabled" and (.disableAccessKeyAuthentication != true) and
       ((.redisConfiguration.authnotrequired // "no") == "no") and
       ((.shardCount // 0) == 0) and .sslPort == 6380 and
-      .redisConfiguration["maxmemory-policy"] == "volatile-lru"
+      (.redisConfiguration.maxmemoryPolicy // .redisConfiguration["maxmemory-policy"]) == "volatile-lru"
     ' <<<"$cache" >/dev/null; then
     echo "ERROR: Azure Cache for Redis $REDIS is not Succeeded/$REDIS_SKU/$REDIS_CAPACITY, non-clustered, key-authenticated, TLS 1.2 on 6380, private-only, with volatile-lru eviction. Correct it explicitly before rerunning." >&2
     return 1
@@ -2426,11 +2478,12 @@ initialize_deploy_only_mode() {
   [[ "$(kubectl get nodes --no-headers | grep -c Ready)" -ge 1 ]] \
     || { echo "ERROR: no Ready nodes in $AKS" >&2; exit 1; }
 
-  WORKLOAD_IDENTITY_CLIENT_ID="$(az identity show -g "$RG" -n "$WORKLOAD_IDENTITY" --query clientId -o tsv 2>/dev/null || true)"
+  WORKLOAD_IDENTITY_CLIENT_ID="$(az identity show -g "$RG" -n "$WORKLOAD_IDENTITY" --query clientId -o tsv)"
+  WORKLOAD_IDENTITY_OBJECT_ID="$(az identity show -g "$RG" -n "$WORKLOAD_IDENTITY" --query principalId -o tsv)"
   AZURE_TENANT_ID="$(az account show --query tenantId -o tsv)"
   resolve_redis_hostname
-  [[ -n "$WORKLOAD_IDENTITY_CLIENT_ID" ]] \
-    || { echo "ERROR: could not resolve workload identity '$WORKLOAD_IDENTITY' clientId in $RG — is the infrastructure fully deployed?" >&2; exit 1; }
+  [[ -n "$WORKLOAD_IDENTITY_CLIENT_ID" && -n "$WORKLOAD_IDENTITY_OBJECT_ID" ]] \
+    || { echo "ERROR: could not resolve workload identity '$WORKLOAD_IDENTITY' clientId and principalId in $RG — is the infrastructure fully deployed?" >&2; exit 1; }
   [[ -n "$REDIS_HOSTNAME" ]] \
     || { echo "ERROR: could not resolve $REDIS_LABEL '$REDIS' hostname in $RG -- is the infrastructure fully deployed?" >&2; exit 1; }
   log "Resolved existing infra — WORKLOAD_IDENTITY_CLIENT_ID=$WORKLOAD_IDENTITY_CLIENT_ID REDIS_HOSTNAME=$REDIS_HOSTNAME"
